@@ -18,6 +18,8 @@ Methodology
 6. Six publication-quality figures
 """
 
+import argparse
+import json
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -453,7 +455,42 @@ def fig6_summary(moments, fits, var_results):
 # 8.  MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Fat-tail risk analysis of stock log-returns",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--tickers", nargs="+", default=["AAPL", "TSLA"], metavar="TICKER",
+        help="One or more Yahoo Finance ticker symbols",
+    )
+    parser.add_argument("--start", default="2015-01-01", help="Start date YYYY-MM-DD")
+    parser.add_argument("--end",   default="2024-12-31", help="End date YYYY-MM-DD")
+    parser.add_argument(
+        "--notional", type=float, default=1_000_000,
+        help="Portfolio notional for VaR calculation",
+    )
+    parser.add_argument(
+        "--save-json", metavar="FILE",
+        help="Write numeric results to a JSON file (optional)",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = _parse_args()
+
+    global TICKERS, START, END, NOTIONAL
+    TICKERS  = [t.upper() for t in args.tickers]
+    START    = args.start
+    END      = args.end
+    NOTIONAL = args.notional
+
+    _palette = ["#1565C0", "#B71C1C", "#2E7D32", "#6A1B9A", "#E65100", "#00838F"]
+    for i, t in enumerate(TICKERS):
+        if t not in C:
+            C[t] = _palette[i % len(_palette)]
+
     sep = "═" * 62
     print(sep)
     print("  Fat Tails, Volatility Clustering & Risk Underestimation")
@@ -476,6 +513,7 @@ def main():
     fig6_summary(moments, fits, var_res)
 
     print("\n── Final Summary " + "─" * 45)
+    summary = {}
     for t in TICKERS:
         m     = moments[t]
         tf    = fits[t]["student_t"]
@@ -487,7 +525,26 @@ def main():
         print(f"    Student-t ν̂             : {tf['nu']:.2f}")
         print(f"    ΔAIC (N vs t)           : {da:.0f}")
         print(f"    Ljung-Box Q(10) on r²   : {lb10:.1f}")
-        print(f"    Gaussian VaR underest.  : ${under:,.0f}  @ 99.9%  ($1M notional)")
+        print(f"    Gaussian VaR underest.  : ${under:,.0f}  @ 99.9%  (${NOTIONAL:,.0f} notional)")
+        summary[t] = {
+            "excess_kurtosis": round(m["excess_kurtosis"], 4),
+            "student_t_nu":    round(tf["nu"], 4),
+            "delta_aic":       round(da, 2),
+            "ljung_box_q10":   round(float(lb10), 2),
+            "var": {
+                str(cl): {
+                    k: round(v, 2) for k, v in var_res[t][cl].items()
+                }
+                for cl in CLS
+            },
+        }
+
+    if args.save_json:
+        payload = {"tickers": TICKERS, "start": START, "end": END,
+                   "notional": NOTIONAL, "results": summary}
+        with open(args.save_json, "w") as fh:
+            json.dump(payload, fh, indent=2)
+        print(f"\n  ✓  Results saved to {args.save_json}")
 
     print(f"\n  ✓  6 figures written to current directory.")
     print(sep)
